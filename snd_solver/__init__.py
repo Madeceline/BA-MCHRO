@@ -1,5 +1,4 @@
-"""静态与时间展开多商品 Service Network Design 求解器接口。"""
-
-from .solver import SNDSolveResult, SNDSolver
-
-__all__ = ["SNDSolveResult", "SNDSolver"]
+"""Compatibility imports for archived SND programs."""
+from m_asro._compat import install_aliases
+install_aliases()
+from m_asro.problems.snd.mip import *

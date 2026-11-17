@@ -15,19 +15,19 @@ from unittest.mock import patch
 
 import numpy as np
 
-from multi_agent_snd import CCEMetaSolver, MultiAgentSNDSolver, UtilityConfig
-from multi_agent_snd.baselines import BASE_SOLVER, OfflineMultiAgentClient
-from multi_agent_snd.evaluation import (SNDEvaluator, lower_bound, validate_instance,
+from m_asro import CCEMetaSolver, MultiAgentSNDSolver, UtilityConfig
+from m_asro.problems.snd.baselines import BASE_SOLVER, OfflineMultiAgentClient
+from m_asro.problems.snd.evaluation import (SNDEvaluator, lower_bound, validate_instance,
                                         validate_perturbation, validate_solution)
-from multi_agent_snd.deployment import MixedSNDSolver
-from multi_agent_snd.execution import execute, isolated_call, validate_code
-from multi_agent_snd.storage import Program, ProgramArchive
-from multi_agent_snd.replay import ReplayClient
-from multi_agent_snd.clustering import select_representatives
-from multi_agent_snd.eoh_s import cpm_select, finite_failure_vectors
-from snd_generator import SNDInstance, SNDParameterBounds
-from snd_solver import SNDSolver
-from snd_solver.solver import BackendUnavailableError
+from m_asro.problems.snd.deployment import MixedSNDSolver
+from m_asro.runtime.execution import execute, isolated_call, validate_code
+from m_asro.experiments.storage import Program, ProgramArchive
+from m_asro.llm.replay import ReplayClient
+from ba_eoh_s.clustering import select_representatives
+from ba_eoh_s.eoh_s import cpm_select, finite_failure_vectors
+from m_asro.problems.snd.generator import SNDInstance, SNDParameterBounds
+from m_asro.problems.snd.mip import SNDSolver
+from m_asro.problems.snd.mip.solver import BackendUnavailableError
 
 
 class FailingClient:
@@ -37,10 +37,10 @@ class FailingClient:
 
 
 class MixedClient:
-    """每次返回合法、重复、非法、缺失解释四个候选。"""
+    """每次返回合法、重复、语法非法、缺失说明四个候选。"""
     def generate(self, prompt: str, temperature: float = 1, n: int = 4) -> list[str]:
         valid = OfflineMultiAgentClient().generate(prompt)[0]
-        return [valid, valid, "EXPLANATION: rejected\n```python\nimport os\n```",
+        return [valid, valid, "EXPLANATION: rejected\n```python\ndef broken(:\n```",
                 "```python\ndef bad(x):\n    return x\n```"]
 
 
@@ -227,7 +227,7 @@ class TestEvaluation(unittest.TestCase):
             fake_execution = {"result": solution, "lines": 1, "elapsed": 0.01,
                               "wall_time": 0.01}
             with patch.object(evaluator, "reference", return_value={"value": 4, "kind": "optimal"}), \
-                    patch("multi_agent_snd.evaluation.execute", return_value=fake_execution):
+                    patch("m_asro.problems.snd.evaluation.execute", return_value=fake_execution):
                 row = evaluator.evaluate(program, data)
         self.assertEqual(row["status"], "ok")
         self.assertEqual(row["metrics"]["path"], 0)
@@ -333,7 +333,7 @@ class TestEvaluation(unittest.TestCase):
         self.assertFalse(any(p.is_alive() for p in multiprocessing.active_children()))
 
     def test_line_limit_is_independent_and_typed(self) -> None:
-        from multi_agent_snd.execution import ExecutionError
+        from m_asro.runtime.execution import ExecutionError
         with self.assertRaises(ExecutionError) as ctx:
             execute("def solve_snd(instance):\n    x = 0\n    x += 1\n    return x", "solve_snd", {},
                     timeout=5, line_limit=1)
@@ -350,7 +350,7 @@ class TestEvaluation(unittest.TestCase):
             validate_code(code, "solve_snd(instance)", max_ast_nodes=1)
 
     def test_scaled_execution_limit_uses_instance_size(self) -> None:
-        from multi_agent_snd.evaluation import SNDEvaluator
+        from m_asro.problems.snd.evaluation import SNDEvaluator
         with TemporaryDirectory() as tmp:
             evaluator = SNDEvaluator(
                 self.data, ProgramArchive(Path(tmp)),
@@ -360,11 +360,10 @@ class TestEvaluation(unittest.TestCase):
             complexity = len(self.data["nodes"]) + len(self.data["arcs"]) + len(self.data["commodities"])
             self.assertEqual(evaluator._execution_line_limit(self.data), min(100, 2 * complexity))
 
-    def test_forbidden_code(self) -> None:
+    def test_previously_forbidden_code_is_syntax_checked_only(self) -> None:
         for code in ("x=1\ndef solve_snd(instance):\n    return {}", "def solve_snd(instance, *args):\n    return {}",
-                     "@print\ndef solve_snd(instance):\n    return {}"):
-            with self.assertRaises(ValueError):
-                validate_code(code, "solve_snd(instance)")
+                     "@open('blocked')\ndef solve_snd(instance):\n    return {}"):
+            validate_code(code, "solve_snd(instance)")
 
     def test_isolated_client_failure(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "intentional client failure"):
@@ -547,7 +546,7 @@ class TestMultiAgentIntegration(unittest.TestCase):
     def test_call_failure_is_visible_redacted_and_archived(self) -> None:
         # 只测试请求错误路径；模拟隔离调用，不花费 API 额度、不执行候选或参考 MIP。
         with TemporaryDirectory() as tmp, patch.dict(os.environ, {"LLM_API_KEY": "test-only-key"}), \
-                patch("multi_agent_snd.solver.isolated_call", side_effect=RuntimeError(
+                patch("m_asro.core.solver.isolated_call", side_effect=RuntimeError(
                     "BadRequestError: supported models: model-a, model-b; test-only-key")) as call:
             solver = MultiAgentSNDSolver(SNDInstance(3, .5, .5, seed=7), llm_client=FailingClient(),
                 generator_directions=("cost",), output_dir=tmp, llm_retries=1, make_plots=False)

@@ -12,10 +12,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from multi_agent_snd import MultiAgentSNDSolver
-from multi_agent_snd.baselines import BASE_SOLVER
-from multi_agent_snd.storage import ProgramArchive
-from snd_generator import SNDInstance
+from m_asro import MultiAgentSNDSolver
+from m_asro.problems.snd.baselines import BASE_SOLVER
+from m_asro.problems.snd.baselines import WARM_START_ALGORITHM_NAMES, warm_start_sources
+from m_asro.experiments.storage import ProgramArchive
+from m_asro.problems.snd.generator import SNDInstance
 
 
 class TestWarmStartPolicy(unittest.TestCase):
@@ -60,6 +61,40 @@ class TestWarmStartPolicy(unittest.TestCase):
         for program in (self.base, clone, formatted_clone):
             self.assertTrue(self.solver._contains_warm_start(program))
         self.assertFalse(self.solver._contains_warm_start(self.first))
+
+    def test_configured_warm_start_collection_is_distinct_and_detected(self):
+        names = ("variable_cost", "fixed_cost_greedy", "capacity_aware", "grasp")
+        sources = warm_start_sources(names)
+        self.assertEqual(tuple(sources), names)
+        self.assertEqual(len({hash(code) for code in sources.values()}), len(names))
+        configured = MultiAgentSNDSolver(
+            SNDInstance(3, .5, .5, seed=7), generator_directions=("cost",),
+            population_size=4, warm_start_algorithms=names,
+            output_dir=self.temporary.name, progress_output=False, make_plots=False,
+            parallel_workers=1, test_instance_count=1)
+        configured.root = Path(self.temporary.name)
+        configured.archive = ProgramArchive(configured.root)
+        programs = [configured.archive.add(
+            player="solver", role="solver", explanation=name, code=code,
+            parents=[], iteration=0, eoh_iteration=0, operator=f"warm_start:{name}")
+                    for name, code in sources.items()]
+        self.assertTrue(all(configured._is_warm_start(program) for program in programs))
+        self.assertEqual(configured.warm_start_algorithms, names)
+
+    def test_all_preset_names_are_available(self):
+        self.assertEqual(set(WARM_START_ALGORITHM_NAMES), {
+            "variable_cost", "fixed_cost_greedy", "capacity_aware", "grasp",
+            "genetic_algorithm", "simulated_annealing", "tabu_search"})
+        self.assertEqual(len(warm_start_sources(WARM_START_ALGORITHM_NAMES)),
+                         len(WARM_START_ALGORITHM_NAMES))
+
+    def test_invalid_warm_start_selection_rejected(self):
+        for names in ((), ("fixed_cost_greedy", "fixed_cost_greedy"), ("unknown",)):
+            with self.subTest(names=names), self.assertRaises(ValueError):
+                MultiAgentSNDSolver(
+                    SNDInstance(3, .5, .5, seed=7), warm_start_algorithms=names,
+                    output_dir=self.temporary.name, progress_output=False,
+                    make_plots=False, parallel_workers=1, test_instance_count=1)
 
     def test_ancestors_do_not_disqualify_a_changed_descendant(self):
         self.first.parent_ids = [self.base.id]

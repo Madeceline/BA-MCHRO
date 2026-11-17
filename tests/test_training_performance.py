@@ -12,13 +12,13 @@ import time
 import unittest
 from unittest.mock import patch
 
-from multi_agent_snd import MultiAgentSNDSolver, UtilityConfig
-from multi_agent_snd.baselines import BASE_SOLVER, OfflineMultiAgentClient
-from multi_agent_snd.evaluation import SNDEvaluator, digest, lower_bound
-from multi_agent_snd.performance import ordered_map, TimingRecorder
-from multi_agent_snd.replay import ReplayClient
-from multi_agent_snd.storage import ProgramArchive
-from snd_generator import SNDInstance
+from m_asro import MultiAgentSNDSolver, UtilityConfig
+from m_asro.problems.snd.baselines import BASE_SOLVER, OfflineMultiAgentClient
+from m_asro.problems.snd.evaluation import SNDEvaluator, digest, lower_bound
+from m_asro.runtime.performance import ordered_map, TimingRecorder
+from m_asro.llm.replay import ReplayClient
+from m_asro.experiments.storage import ProgramArchive
+from m_asro.problems.snd.generator import SNDInstance
 
 
 def legacy_bound(data, field):
@@ -82,7 +82,7 @@ class TestTrainingPerformance(unittest.TestCase):
         def slow(*args):
             time.sleep(.02)
             return original(*args)
-        with patch('multi_agent_snd.evaluation.lower_bound', side_effect=slow) as compute:
+        with patch('m_asro.problems.snd.evaluation.lower_bound', side_effect=slow) as compute:
             with ThreadPoolExecutor(max_workers=6) as pool:
                 rows = list(pool.map(self.evaluator.instance_lower_bounds,
                                      [copy.deepcopy(self.data) for _ in range(6)]))
@@ -107,7 +107,7 @@ class TestTrainingPerformance(unittest.TestCase):
         def bad(*args):
             time.sleep(.05)
             raise ValueError('bound failed')
-        with patch('multi_agent_snd.evaluation.lower_bound', side_effect=bad) as compute:
+        with patch('m_asro.problems.snd.evaluation.lower_bound', side_effect=bad) as compute:
             with ThreadPoolExecutor(max_workers=3) as pool:
                 futures = [pool.submit(fail, i) for i in range(3)]
                 for future in futures:
@@ -123,9 +123,9 @@ class TestTrainingPerformance(unittest.TestCase):
         solution = dict(arc_open={'0': 1}, flows={'0': {'0': 4}})
         first, second = self.program(), self.program(BASE_SOLVER + '\n# variant')
         with patch.object(self.evaluator, 'reference', return_value={'value': 14, 'kind': 'heuristic'}), \
-                patch('multi_agent_snd.evaluation.execute', return_value={
+                patch('m_asro.problems.snd.evaluation.execute', return_value={
                     'result': solution, 'lines': 5, 'elapsed': .01, 'wall_time': .02}) as execute, \
-                patch('multi_agent_snd.evaluation.lower_bound', wraps=lower_bound) as bound:
+                patch('m_asro.problems.snd.evaluation.lower_bound', wraps=lower_bound) as bound:
             with ThreadPoolExecutor(max_workers=4) as pool:
                 rows = list(pool.map(lambda _: self.evaluator.evaluate(first, data), range(4)))
             other = self.evaluator.evaluate(second, data)
@@ -144,7 +144,7 @@ class TestTrainingPerformance(unittest.TestCase):
             with ThreadPoolExecutor(max_workers=4) as pool:
                 list(pool.map(self.evaluator.reference, [self.data] * 4))
             self.assertEqual(compute.call_count, 1)
-        with patch('multi_agent_snd.evaluation.execute', return_value={'result': self.data}) as execute:
+        with patch('m_asro.problems.snd.evaluation.execute', return_value={'result': self.data}) as execute:
             with ThreadPoolExecutor(max_workers=4) as pool:
                 rows = list(pool.map(lambda _: self.evaluator.sample(generator, 0), range(4)))
             self.assertTrue(all(row['status'] == 'ok' for row in rows))
@@ -167,7 +167,7 @@ class TestTrainingPerformance(unittest.TestCase):
             time.sleep(.02)
             with lock:
                 active -= 1
-        with patch('multi_agent_snd.evaluation.execute', side_effect=execute):
+        with patch('m_asro.problems.snd.evaluation.execute', side_effect=execute):
             with ThreadPoolExecutor(max_workers=8) as pool:
                 list(pool.map(lambda _: self.evaluator._execute('', 'solve_snd', {}), range(8)))
         self.assertEqual(peak, 2)
@@ -206,7 +206,7 @@ class TestTrainingPerformance(unittest.TestCase):
                 client, prompt, temperature, n, seed = arguments
                 return {'result': OfflineMultiAgentClient().generate(prompt, temperature, n)}
             with patch.object(solver, '_search', side_effect=search), \
-                    patch('multi_agent_snd.solver.isolated_call', side_effect=llm):
+                    patch('m_asro.core.solver.isolated_call', side_effect=llm):
                 response = solver._search_responses(1, pools, meta)
             calls = {call['player']: (call['seed'], call['prompt']) for call in solver.archive.calls}
             self.assertEqual(len(calls), 4)

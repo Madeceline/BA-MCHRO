@@ -7,9 +7,9 @@ import copy
 import unittest
 from collections import deque
 
-from snd_generator import SNDInstance, SNDParameterBounds
-from snd_solver import SNDSolver
-from multi_agent_snd.evaluation import validate_instance, validate_perturbation, validate_solution
+from m_asro.problems.snd.generator import SNDInstance, SNDParameterBounds
+from m_asro.problems.snd.mip import SNDSolver
+from m_asro.problems.snd.evaluation import validate_instance, validate_perturbation, validate_solution
 
 
 class TestSNDGenerator(unittest.TestCase):

@@ -1,5 +1,4 @@
-"""当前多主体结果的独立可视化工具，不参与搜索逻辑。"""
-
-from .multi_agent import MultiAgentVisualizer
-
-__all__ = ["MultiAgentVisualizer"]
+"""Compatibility imports for archived SND programs."""
+from m_asro._compat import install_aliases
+install_aliases()
+from m_asro.problems.snd.visualization import *

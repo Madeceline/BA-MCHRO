@@ -1,5 +1,4 @@
-"""静态与时间展开多商品服务网络设计实例生成器。"""
-
-from .instance import Arc, Commodity, SNDInstance, SNDParameterBounds
-
-__all__ = ["Arc", "Commodity", "SNDInstance", "SNDParameterBounds"]
+"""Compatibility imports for archived SND programs."""
+from m_asro._compat import install_aliases
+install_aliases()
+from m_asro.problems.snd.generator import *
