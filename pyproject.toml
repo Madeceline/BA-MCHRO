@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "litellm>=1.101.0",
+    "marimo>=0.24.2",
     "matplotlib>=3.9",
     "numpy>=2.5.3",
     "scipy>=1.13",
@@ -18,14 +19,5 @@ build-backend = "setuptools.build_meta"
 [project.optional-dependencies]
 test = ["pytest>=8", "pytest-subtests>=0.14"]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["m_asro*", "ba_eoh_s*", "multi_agent_snd*", "snd_generator*", "snd_solver*", "snd_visualization*"]
-exclude = ["experiments*", "tests*"]
-
 [tool.setuptools.package-data]
-"m_asro.llm" = ["operator_prompts.txt"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-p no:cacheprovider"
+"eoh" = ["operator_prompts.txt"]

@@ -1,2 +1,2 @@
-include *.md
-recursive-include tests *.py
+include README.md pyproject.toml setup.py uv.lock
+recursive-include BA-MCHRO *.py *.txt

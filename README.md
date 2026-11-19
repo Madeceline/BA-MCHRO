@@ -2,130 +2,111 @@
 
 Bayesian active evaluation and complementary heuristic coevolution for service network design (SND).
 
-M-ASRO maintains a Solver player and directional Generator players in a general-sum empirical game. A coarse correlated equilibrium (CCE) defines the meta-strategy. BA-EoH-S supplies Bayesian performance modeling, complementary portfolio selection and paired active evaluation inside the Solver response oracle.
+BA-MCHRO maintains one Solver and up to six directional Generator players in a general-sum empirical game. M-PSRO expands their strategy pools using LLM program search; a coarse correlated equilibrium (CCE) supplies the meta-strategy. Bayesian modeling, active evaluation and Bayesian-CPM operate inside the Solver response oracle. Generator search, player utilities and the CCE linear program retain their original definitions.
 
-## Structure
+## Source layout
 
 ```text
-m_asro/
-  core/             M-PSRO controller, CCE, utilities and interruption handling
-  llm/              Clients, replay, parsing and operator prompts
-  runtime/          Isolated execution, concurrency, progress and timing
-  problems/snd/     Problem adapter, generation, reference solvers and deployment
-  experiments/      Program storage and evaluation diagnostics
-ba_eoh_s/
-  eoh_s.py          CPI, CPM, complementary search and local search
-  clustering.py     Population representative selection
-  bayesian/         Observations, conjugate regression, posterior CPM and acquisition
-tests/              Core unit and offline/replay integration tests
+BA-MCHRO/
+  snd/        SND instances, constraints, evaluation, references and deployment
+  m_asro/     M-PSRO, CCE, utilities, process execution, storage and diagnostics
+  eoh/        EoH search, clustering, LLM clients, operators, prompts and replay
+  ba-eoh-s/   Complementary search, Bayesian model, CPM and active evaluation
 ```
 
-The package organization follows [ASRO](https://github.com/Kexy24/ASRO/tree/main/asro). This repository retains its own Solver–Generator game, utilities and CCE formulation. Compatibility packages (`multi_agent_snd`, `snd_generator`, `snd_solver`, `snd_visualization`) preserve imports used by previously exported programs.
-
-This distribution contains core source and mathematical documentation. Demo scripts, benchmark drivers, instance datasets, training results, exported trained algorithms and credentials are excluded. The SND generation implementation is included because the training controller depends on it.
+The import names are `snd`, `m_asro`, `eoh` and `ba_eoh_s`. `setup.py` maps the four source directories to those packages; `ba-eoh-s` is the physical directory name, while Python imports use underscores. This repository distributes runtime sources only. Demos, tests, plotting tools, datasets, experiment measurements and historical generated algorithms are not included.
 
 ## Installation
 
-Python 3.12 or later is required.
+Python 3.12 or later is required. From the repository root:
 
 ```bash
-uv sync --extra test
+uv sync --locked
 ```
 
 Alternatively:
 
 ```bash
-python -m pip install -e ".[test]"
+python -m pip install -e .
 ```
 
-SciPy/HiGHS provides the default MIP and LP backends. Gurobi, CPLEX and OR-Tools are optional reference backends and require separate installation.
+SciPy/HiGHS is the default LP and MIP backend. Gurobi, CPLEX and OR-Tools are optional reference backends and require separate installation. The dependency bounds and lockfile are retained from the full project. They also contain optional-workflow libraries used there; publishing this subset does not re-resolve those dependencies.
 
-## Use
+## Offline run
 
-Create a Python file with a main guard so isolated processes can start on Windows:
+Save the following as a Python script and execute it. The `__main__` guard is required for spawned processes, especially on Windows.
 
 ```python
 from m_asro import MultiAgentSNDSolver
-from m_asro.problems.snd.generator import SNDInstance
+from snd.generator import SNDInstance
 from ba_eoh_s.bayesian import BayesianOracleConfig
+
 
 def main():
     solver = MultiAgentSNDSolver(
-        SNDInstance(4, .6, .5, seed=7),
+        SNDInstance(3, .7, .5, seed=7),
+        generator_directions=("cost",),
+        outer_iterations=1,
+        eoh_iterations=1,
+        population_size=2,
+        instances_per_generator=1,
+        validation_instance_count=1,
+        test_instance_count=1,
         eoh_framework="eoh-s",
         response_mode="mpsro",
+        make_plots=False,
         bayesian_config=BayesianOracleConfig(
             cpm_method="bayesian",
             active_evaluation=True,
-            evaluation_budget=256,
-            n_draws=256,
+            evaluation_budget=128,
+            n_draws=64,
+            min_observations=1,
         ),
-        make_plots=False,
     )
-    result = solver.solve("Minimize cost subject to capacity and flow conservation")
+    result = solver.solve("Minimize fixed and transport costs subject to flow and capacity constraints")
     print(result.objective, result.output_dir)
+
 
 if __name__ == "__main__":
     main()
 ```
 
-The default generation client is offline. API execution requires an explicit `LiteLLMClient`:
+The default generation client is deterministic and offline: it does not contact an LLM. The example verifies the execution path rather than demonstrating discovery quality. Runs are written to `experiments/runs/` by default; pass `output_dir` to choose another location. Plotting is disabled by default in this core-only distribution. `make_plots=True` requires the separate plotting tools from the full project.
+
+## API-backed generation
+
+Pass an explicit `LiteLLMClient` as `llm_client` to enable model calls. Configure credentials in process environment variables or an untracked local environment file. Never commit API keys.
 
 ```python
-from m_asro.llm.client import LiteLLMClient
+from m_asro import LiteLLMClient
 
-client = LiteLLMClient(model="openai/<provider-model-name>")
+client = LiteLLMClient(model="openai/<provider-model-id>")
 # Pass llm_client=client to MultiAgentSNDSolver.
 ```
 
-Configure `LLM_API_KEY` and `LLM_BASE_URL` through the process environment or a local `llmapi.env`. OpenAI-compatible environment names are also supported. Never commit credentials. API training incurs provider charges.
+Use the provider-qualified model identifier required by LiteLLM. An OpenAI-compatible endpoint can be configured with `OPENAI_BASE_URL` and `OPENAI_API_KEY`. API execution consumes the account's inference quota. `response_workers`, `operator_generation_workers` and `llm_max_concurrency` bound player searches, operator generation and in-flight LLM requests, respectively. Operator instructions are in `BA-MCHRO/eoh/operator_prompts.txt`.
 
-## Configuration
-
-| Setting | Role |
-| --- | --- |
-| `outer_iterations` | Empirical-game expansion rounds |
-| `eoh_iterations`, `population_size` | Response-search depth and local portfolio capacity |
-| `warm_start_algorithms` | Initialization programs, excluded from final Solver exports |
-| `instances_per_generator` | Training samples per Generator program |
-| `validation_instance_count`, `test_instance_count` | Validation and held-out sample counts |
-| `strategy_pool_limit`, `max_profiles` | Strategy-pool and CCE joint-profile limits |
-| `response_workers` | Concurrent player response searches |
-| `operator_generation_workers`, `llm_max_concurrency` | Operator generation and shared LLM concurrency |
-| `candidate_timeout`, `execution_line_limit` | Candidate execution budgets |
-| `reference_method`, `time_limit`, `reference_timeout` | Reference selection and solver/process budgets |
-
-`BayesianOracleConfig` controls Solver-oracle behavior:
+## Bayesian configurations
 
 | Variant | `cpm_method` | `active_evaluation` |
 | --- | --- | --- |
-| Original | `original` | `False` |
+| Original evaluation and selection | `original` | `False` |
 | Bayesian-CPM | `bayesian` | `False` |
 | Active evaluation | `original` | `True` |
-| Combined | `bayesian` | `True` |
+| Combined BA-MCHRO | `bayesian` | `True` |
 
-Both Bayesian options default to disabled. Acquisition supports `ucb`, `uniform` and `random`; nested EVI is not implemented. `evaluation_budget` counts real Solver-oracle attempts, including initial controls, failures, paired completion and member audits. Cache hits and posterior predictions are tracked separately. `max_wall_time` limits admission of additional evaluations; empirical-game updates, Generator search, validation and held-out testing have separate costs.
+Pass these settings through `BayesianOracleConfig`. Disabling both additions retains the original path. `evaluation_budget` counts all real Solver-oracle attempts, including initialization, paired controls, failures and final member audits. Cache hits do not add independent likelihood samples. Generator search, empirical payoff-table updates, validation and held-out testing are outside that oracle budget. `max_wall_time` limits admission of new evaluations; individual executions retain their configured timeout.
 
-## Mathematical boundaries
+The performance model uses independent per-program conjugate Gaussian linear regressions over instance features. A joint parameter draw preserves dependence across instances for each program. Model residual variance represents approximation error, not randomness in a deterministic program's repeated output. The model does not learn cross-program residual correlation.
 
-- CCE constraints, player utilities, Generator search and member-weighted mixed payoffs retain their definitions. Responses search against one common previous strategy/meta-strategy snapshot.
-- Portfolio CPI aggregates the per-instance minimum loss. Mixed-response utility uses member weights. These are different quantities.
-- The performance model uses per-program conjugate linear Gaussian regression. Deterministic cache duplicates add no likelihood terms; model uncertainty describes unobserved performance rather than random program output.
-- Posterior predictions guide acquisition and selection, never replace real empirical-game payoffs. Validation and held-out results do not update the training posterior.
-- Source checks enforce Python syntax and size limits. Separate processes enforce execution budgets, and solutions undergo independent feasibility validation. Process isolation is not a security sandbox for hostile code.
-- Warm starts may serve as temporary parents and controls, but cannot enter final Solver response support. Handled interruption attempts to export an available validated non-warm portfolio; training is not resumable.
+For a complementary portfolio H, CPI is the expected per-instance minimum loss. Bayesian-CPM estimates its posterior, credible intervals, marginal gains and improvement probabilities. Active evaluation uses complementarity-aware UCB with paired real evaluations; uniform and random acquisition are also available. Nested EVI is not implemented.
 
-The linear model has fixed residual variance and independent program regressions. Feature misspecification and finite representative samples limit calibration. Finite LLM searches do not establish best responses over all programs, and CCE describes the finite empirical game. No general speed, quality or convergence guarantee follows from these mechanisms.
+M-PSRO mixed responses instead use member-weighted expected utility. CPI is not a mixed-strategy payoff. Empirical payoff tables use real evaluations, not posterior predictions. Training, validation and test observations remain isolated. Warm starts are initialization aids and cannot enter exported Solver responses.
 
-## Validation
+## Execution and evidence
 
-```bash
-python -m pytest -q
-```
+The SND model has binary arc-open decisions and nonnegative splittable commodity flows, shared capacities and flow conservation. The objective is fixed opening cost plus transport cost. Generated `solve_snd(instance)` programs return actual opening and flow decisions. The evaluator independently recomputes cost and checks feasibility. Reference values may be proven MIP optima or feasible incumbents; a gap against an incumbent is not a certified optimality gap.
 
-The tests cover conjugate posterior algebra, seeded sampling, cold starts, complementarity, paired budget admission, cache deduplication, failure evidence, split isolation, weighted mixed utilities, CCE, warm-start exclusion, interruption and offline/replay training. Optional archive-dependent checks require local fixtures; this source release contains no measured benchmark results.
+Candidate checks cover Python syntax and source size. Separate-process execution enforces wall-clock and Python line-event budgets; it is not a security container for hostile code. Handled interruption can export an available verified portfolio but does not implement resumable training. Deployment uses the existing validation and fallback rules.
 
-## Documentation
-
-- [Mathematical model and algorithm structure](项目数学原理与算法结构.md)
-- [Game definitions](博弈详解.md)
+Runs record configurations, sources and lineage, LLM calls, real evaluations, timings, meta-strategies and exports. Preserve the runtime configuration and source hashes when reporting experiments. Exact replay requires the same prompts and search configuration used for recording. The finite empirical CCE and bounded program searches do not imply equilibrium convergence over all programs. No general quality improvement or training speedup is asserted by this source release.
